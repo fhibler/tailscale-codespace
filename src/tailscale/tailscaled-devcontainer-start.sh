@@ -67,11 +67,18 @@ fi
 if [[ -n "$auth_key" ]]; then
   if [[ "$auth_key" == "test-auth-key" ]]; then
     touch /tmp/test-auth-key-seen
+    if [[ -n "${TS_EXIT_NODE}" ]]; then
+      touch /tmp/test-exit-node-seen
+    fi
   else
     hostnamearg=""
     if [[ -n "${CODESPACE_NAME}" ]]; then
       hostnamearg="--hostname=${CODESPACE_NAME}"
     fi
-    /usr/local/bin/tailscale up --accept-routes --authkey="$auth_key" $hostnamearg
+    exitnodearg=""
+    if [[ -n "${TS_EXIT_NODE}" ]]; then
+      exitnodearg="--exit-node=${TS_EXIT_NODE}"
+    fi
+    /usr/local/bin/tailscale up --accept-routes --authkey="$auth_key" $hostnamearg $exitnodearg
   fi
 fi

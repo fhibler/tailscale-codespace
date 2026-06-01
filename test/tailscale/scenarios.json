@@ -27,5 +27,15 @@
         "features": {
             "tailscale": {}
         }
+    },
+    "tailscale_exit_node": {
+        "image": "ubuntu:latest",
+        "containerEnv": {
+            "TS_AUTH_KEY": "test-auth-key",
+            "TS_EXIT_NODE": "test-exit-node"
+        },
+        "features": {
+            "tailscale": {}
+        }
     }
 }

@@ -80,5 +80,24 @@ if [[ -n "$auth_key" ]]; then
       exitnodearg="--exit-node=${TS_EXIT_NODE}"
     fi
     /usr/local/bin/tailscale up --accept-routes --authkey="$auth_key" $hostnamearg $exitnodearg
+
+    # tailscaled picks an auto: exit node once, right after `up`. If it has no
+    # home DERP yet the pick fails ("no preferred DERP, try again later") and is
+    # never retried, so keep re-applying the pref until an exit node is in use.
+    if [[ "${TS_EXIT_NODE}" == auto:* ]]; then
+      (
+        exec 1>>$TAILSCALED_LOG 2>&1
+        count=60
+        while ((count--)); do
+          if /usr/local/bin/tailscale status --json 2>/dev/null | grep -q '"ExitNodeStatus": {'; then
+            exit 0
+          fi
+          sleep 2
+          /usr/local/bin/tailscale set --exit-node="${TS_EXIT_NODE}"
+        done
+        echo "tailscaled-devcontainer-start: no exit node selected for ${TS_EXIT_NODE} after 120s"
+      ) &
+      disown
+    fi
   fi
 fi

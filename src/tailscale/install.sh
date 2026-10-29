@@ -9,9 +9,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 platform=$(uname -m)
 if [ "$platform" = "x86_64" ]; then
-    tailscale_url="https://pkgs.tailscale.com/stable/tailscale_${VERSION}_amd64.tgz"
+    arch=amd64
 elif [ "$platform" = "aarch64" ] || [ "$platform" = "arm64" ]; then
-    tailscale_url="https://pkgs.tailscale.com/stable/tailscale_${VERSION}_arm64.tgz"
+    arch=arm64
 else
     echo "Unsupported platform: $platform"
     exit 1
@@ -62,11 +62,22 @@ download() {
 }
 
 script_dir="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-scratch_dir="/tmp/tailscale"
-mkdir -p "$scratch_dir"
+scratch_dir=$(mktemp -d)
 trap 'rm -rf "$scratch_dir" /var/lib/apt/lists/*' EXIT
 
-download "$tailscale_url" | tar -xzf - --strip-components=1 -C "$scratch_dir"
+# Resolve "latest" up front: pkgs.tailscale.com has no checksum for the
+# tailscale_latest_* redirect, and the tarball and its checksum must come from
+# the same release even if a new one lands in between.
+pkgs_url="https://pkgs.tailscale.com/stable"
+version="$VERSION"
+if [[ "$version" == "latest" ]]; then
+  version=$(download "$pkgs_url/?mode=json" | sed -n 's/^.*"TarballsVersion": *"\([^"]*\)".*$/\1/p')
+fi
+tarball="tailscale_${version}_${arch}.tgz"
+download "$pkgs_url/$tarball" > "$scratch_dir/$tarball"
+sha256=$(download "$pkgs_url/$tarball.sha256")
+echo "$sha256  $scratch_dir/$tarball" | sha256sum -c -
+tar -xzf "$scratch_dir/$tarball" --strip-components=1 -C "$scratch_dir"
 install -D -m 755 "$scratch_dir/tailscale" /usr/local/bin/tailscale
 install -D -m 755 "$scratch_dir/tailscaled" /usr/local/sbin/tailscaled
 install -D -m 755 "$script_dir/tailscaled-entrypoint.sh" /usr/local/sbin/tailscaled-entrypoint
@@ -92,12 +103,7 @@ mkdir -p /var/lib/tailscale /var/run/tailscale /var/log
 touch /var/log/tailscaled.log
 
 if ! command -v iptables >& /dev/null; then
-  if command -v apt-get >& /dev/null; then
-    apt-get update
-    apt-get install -y --no-install-recommends iptables
-  else
-    >&2 echo "WARNING: iptables not installed. tailscaled might fail."
-  fi
+  install_packages iptables || >&2 echo "WARNING: iptables not installed. tailscaled might fail."
 fi
 
 # The TS_ENFORCE guard parses `tailscale status --json` with jq.

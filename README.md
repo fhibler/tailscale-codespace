@@ -49,9 +49,10 @@ automatically perform a `tailscale up --accept-routes --auth-key=$TS_AUTH_KEY`.
 
 | Variable | Effect |
 | --- | --- |
-| `TS_AUTH_KEY` | Signs in automatically on start, see above. Removed from the environment before your shell starts. |
+| `TS_AUTH_KEY` | Signs in automatically on start, see above. Kept out of tailscaled's environment and off the `tailscale up` command line, but it stays in the container's environment, so shells opened with `docker exec` (VS Code terminals included) still see it. |
 | `TS_EXIT_NODE` | Passed to `tailscale up --exit-node=`. Takes a node name or IP, or `auto:any` to let Tailscale choose. An `auto:` pick is retried for up to 120s, because tailscaled gives up on it when it has no home DERP yet. Needs `TS_AUTH_KEY`. |
 | `TS_ENFORCE` | `1` turns on the zsh guard below. Anything else, or unset, leaves it off. |
+| `TS_SECURE_MARKER` | `0` hides the guard's green `SECURE` prompt marker. The `UNSECURE` warning stays. |
 
 Outside Codespaces, keep them in an untracked env file and pass it to the
 container:
@@ -68,7 +69,7 @@ TS_AUTH_KEY=tskey-auth-...
 TS_EXIT_NODE=auto:any
 ```
 
-`containerEnv` works too for `TS_EXIT_NODE` and `TS_ENFORCE`, but would put
+`containerEnv` works too for the other variables, but would put
 the auth key into `devcontainer.json`.
 
 ## Enforcing an exit node in zsh
@@ -76,8 +77,9 @@ the auth key into `devcontainer.json`.
 With `TS_ENFORCE=1`, every interactive zsh checks that Tailscale is signed in
 and routing through an online exit node. When it is not, the shell prints a
 red `UNSECURE CONNECTION` banner with the reason at startup and prefixes the
-prompt with `UNSECURE`. The check is repeated before every prompt, so the
-marker appears and disappears as the connection changes.
+prompt with a red `UNSECURE`. When it is, the prompt is prefixed with a green
+`SECURE` instead, unless `TS_SECURE_MARKER=0`. The check is repeated before
+every prompt, so the marker follows the connection as it changes.
 
 The guard is installed to `/usr/local/share/tailscale/tailscale-guard.zsh` and
 sourced from the system zshrc (`/etc/zsh/zshrc` or `/etc/zshrc`), so it works
@@ -91,7 +93,7 @@ It is a warning, not a kill switch: traffic still flows without an exit node.
 ## Details
 
 - A mount is added called `tailscale-${devcontainerId}` mapped to
-  `/var/lib/tailscale` to persist taislcaled state across devcontainer rebuilds,
+  `/var/lib/tailscale` to persist tailscaled state across devcontainer rebuilds,
   so a single devcontainer will remain logged in for the devcontainer lifetime.
 - The feature requires `CAP_NET_ADMIN` in order to configure certain network
   properties for kernel mode tailscale.
@@ -109,5 +111,5 @@ Inside a codespace you can use the `Tasks:Run Test Task` command.
 On a standalone machine tests can be run with:
 
 ```shell
-npx @devcontainers/cli features test
+npx @devcontainers/cli features test --base-image ubuntu:latest
 ```

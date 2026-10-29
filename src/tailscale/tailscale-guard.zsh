@@ -1,7 +1,8 @@
 # Tailscale failsafe for interactive zsh sessions.
 # With TS_ENFORCE=1, Tailscale must be signed in and routing through an online
-# exit node. Otherwise the prompt is prefixed with [UNSECURE] and a warning is
-# printed when the shell starts. Re-checked before every prompt.
+# exit node. Otherwise the prompt is prefixed with UNSECURE and a warning is
+# printed when the shell starts; when it is, the prompt is prefixed with SECURE
+# unless TS_SECURE_MARKER=0. Re-checked before every prompt.
 #
 # install.sh copies this to /usr/local/share/tailscale/ and sources it from the
 # system zshrc, so it loads before ~/.zshrc and any oh-my-zsh theme.
@@ -21,25 +22,23 @@ _ts_guard_problem() {
     fi
 
     local json
-    if ! json=$(timeout 3 tailscale status --json 2>/dev/null) || [[ -z "$json" ]]; then
+    if ! json=$(timeout 3 tailscale status --json --peers=false 2>/dev/null) || [[ -z "$json" ]]; then
         print "tailscaled is not reachable"
         return
     fi
 
-    local state exit_online
-    state=$(jq -r '.BackendState // "Unknown"' <<<"$json")
-    exit_online=$(jq -r '.ExitNodeStatus.Online // "none"' <<<"$json")
-
-    if [[ "$state" != "Running" ]]; then
-        print "tailscale is not signed in (state: $state)"
-    elif [[ "$exit_online" == "none" ]]; then
-        print "no exit node is in use"
-    elif [[ "$exit_online" != "true" ]]; then
-        print "the exit node is offline"
-    fi
+    jq -r '
+        if .BackendState != "Running" then
+            "tailscale is not signed in (state: \(.BackendState // "Unknown"))"
+        elif .ExitNodeStatus == null then "no exit node is in use"
+        elif .ExitNodeStatus.Online != true then "the exit node is offline"
+        else empty end' <<<"$json" 2>/dev/null ||
+        print "tailscale status is unreadable"
 }
 
-typeset -g _TS_GUARD_PREFIX='%(9V.%K{red}%F{white}%B UNSECURE %b%f%k .)'
+typeset -g _TS_GUARD_SECURE='%K{green}%F{black}%B SECURE %b%f%k '
+[[ "${TS_SECURE_MARKER:-1}" == "0" ]] && _TS_GUARD_SECURE=''
+typeset -g _TS_GUARD_PREFIX="%(9V.%K{red}%F{white}%B UNSECURE %b%f%k .$_TS_GUARD_SECURE)"
 
 # Prepends the marker here rather than at load time: the system zshrc sources
 # this file before ~/.zshrc and its theme, which then overwrite PROMPT. Strips
@@ -66,6 +65,6 @@ add-zsh-hook precmd _ts_guard_precmd
     print -P "%K{red}%F{white}%B                                                            %b%f%k"
     print -P "%F{red}%B  Reason:%b%f $problem"
     print -P "%F{red}%B  Traffic is NOT routed through a Tailscale exit node.%b%f"
-    print -P "  Fix: tailscale up && tailscale set --exit-node=\${TS_EXIT_NODE:-<node>}"
+    print -r -- "  Fix: sudo tailscale up && sudo tailscale set --exit-node=${TS_EXIT_NODE:-<node>}"
     print
 }

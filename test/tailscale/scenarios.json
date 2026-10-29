@@ -1,10 +1,4 @@
 {
-    "tailscale_on_ubuntu": {
-        "image": "ubuntu:latest",
-        "features": {
-            "tailscale": {}
-        }
-    },
     "tailscale_on_alma": {
         "image": "almalinux:latest",
         "features": {
@@ -22,7 +16,8 @@
     "tailscale_auth_key": {
         "image": "ubuntu:latest",
         "containerEnv": {
-            "TS_AUTH_KEY": "test-auth-key"
+            "TS_AUTH_KEY": "test-auth-key",
+            "CODESPACE_NAME": "test-codespace"
         },
         "features": {
             "tailscale": {}

@@ -23,7 +23,7 @@ if [[ ! -c /dev/net/tun ]]; then
     >&2 cat - <<-EOF
 Error: /dev/net/tun is missing and could not be created!
 
-taiilscaled will fail to start.
+tailscaled will fail to start.
 
 You can start tailscaled manually in userspace mode, see:
 https://tailscale.com/kb/1112/userspace-networking
@@ -32,7 +32,6 @@ EOF
 fi
 
 
-TAILSCALED_PID=""
 TAILSCALED_SOCK=/var/run/tailscale/tailscaled.sock
 TAILSCALED_LOG=/var/log/tailscaled.log
 
@@ -50,36 +49,35 @@ TAILSCALED_LOG=/var/log/tailscaled.log
 ) &
 TAILSCALED_PID=$!
 
-if [[ -n "$TAILSCALED_PID" ]]; then
-  count=100
-  while ((count--)); do
-    [[ -f $TAILSCALED_SOCK ]] && break
-    sleep 0.01
+count=100
+while ((count--)); do
+  [[ -S $TAILSCALED_SOCK ]] && break
+  sleep 0.01
 
-    if ! kill -0 "$TAILSCALED_PID"; then
-      >&2 echo "ERROR: tailscaled exited during startup, logs follow:"
-      >&2 cat $TAILSCALED_LOG
-      break
-    fi
-  done
-fi
+  if ! kill -0 "$TAILSCALED_PID"; then
+    >&2 echo "ERROR: tailscaled exited during startup, logs follow:"
+    >&2 cat $TAILSCALED_LOG
+    break
+  fi
+done
 
 if [[ -n "$auth_key" ]]; then
+  up_args=(--accept-routes)
+  if [[ -n "${CODESPACE_NAME}" ]]; then
+    up_args+=("--hostname=${CODESPACE_NAME}")
+  fi
+  if [[ -n "${TS_EXIT_NODE}" ]]; then
+    up_args+=("--exit-node=${TS_EXIT_NODE}")
+  fi
+
   if [[ "$auth_key" == "test-auth-key" ]]; then
-    touch /tmp/test-auth-key-seen
-    if [[ -n "${TS_EXIT_NODE}" ]]; then
-      touch /tmp/test-exit-node-seen
-    fi
+    # Feature tests have no control server to sign in to, so record what
+    # `tailscale up` would have been given instead.
+    printf '%s\n' "${up_args[@]}" > /tmp/test-tailscale-up-args
   else
-    hostnamearg=""
-    if [[ -n "${CODESPACE_NAME}" ]]; then
-      hostnamearg="--hostname=${CODESPACE_NAME}"
-    fi
-    exitnodearg=""
-    if [[ -n "${TS_EXIT_NODE}" ]]; then
-      exitnodearg="--exit-node=${TS_EXIT_NODE}"
-    fi
-    /usr/local/bin/tailscale up --accept-routes --authkey="$auth_key" $hostnamearg $exitnodearg
+    # Hand over the key through a pipe: on the command line, every process in
+    # the container could read it from /proc/<pid>/cmdline.
+    /usr/local/bin/tailscale up "${up_args[@]}" --auth-key=file:<(printf '%s' "$auth_key")
 
     # tailscaled picks an auto: exit node once, right after `up`. If it has no
     # home DERP yet the pick fails ("no preferred DERP, try again later") and is
@@ -89,7 +87,7 @@ if [[ -n "$auth_key" ]]; then
         exec 1>>$TAILSCALED_LOG 2>&1
         count=60
         while ((count--)); do
-          if /usr/local/bin/tailscale status --json 2>/dev/null | grep -q '"ExitNodeStatus": {'; then
+          if /usr/local/bin/tailscale status --json --peers=false 2>/dev/null | grep -q '"ExitNodeStatus": {'; then
             exit 0
           fi
           sleep 2

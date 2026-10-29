@@ -17,28 +17,32 @@ else
     exit 1
 fi
 
-CURL_INSTALL_ATTEMPTED=""
-install_curl() {
-  CURL_INSTALL_ATTEMPTED=1
-
+install_packages() {
   if type apt-get > /dev/null 2>/dev/null; then
     apt-get update
     # install recommends left on so we get ca-certificates.
-    apt-get -y install curl
+    apt-get -y install "$@"
   elif type microdnf > /dev/null 2>/dev/null; then
     microdnf makecache
-    microdnf -y install --refresh --best --nodocs --noplugins --setopt=install_weak_deps=0 curl
+    microdnf -y install --refresh --best --nodocs --noplugins --setopt=install_weak_deps=0 "$@"
   elif type dnf > /dev/null 2>/dev/null; then
-    dnf check-update
-    dnf -y install --refresh --best --nodocs --noplugins --setopt=install_weak_deps=0 curl
+    # check-update exits 100 when updates are available, which is not an error.
+    dnf check-update || [ $? -eq 100 ]
+    dnf -y install --refresh --best --nodocs --noplugins --setopt=install_weak_deps=0 "$@"
   elif type yum > /dev/null 2>/dev/null; then
-    yum -y install --noplugins --setopt=install_weak_deps=0 curl
+    yum -y install --noplugins --setopt=install_weak_deps=0 "$@"
   elif type apk > /dev/null 2>/dev/null; then
-    apk add curl
+    apk add "$@"
   else
-    2> echo "Unknown platform, can not automate curl install. curl is required to download tailscale"
+    >&2 echo "Unknown platform, can not automate install of: $*"
     return 1
   fi
+}
+
+CURL_INSTALL_ATTEMPTED=""
+install_curl() {
+  CURL_INSTALL_ATTEMPTED=1
+  install_packages curl
 }
 
 download() {
@@ -67,6 +71,22 @@ install -D -m 755 "$scratch_dir/tailscale" /usr/local/bin/tailscale
 install -D -m 755 "$scratch_dir/tailscaled" /usr/local/sbin/tailscaled
 install -D -m 755 "$script_dir/tailscaled-entrypoint.sh" /usr/local/sbin/tailscaled-entrypoint
 install -D -m 755 "$script_dir/tailscaled-devcontainer-start.sh" /usr/local/sbin/tailscaled-devcontainer-start
+install -D -m 644 "$script_dir/tailscale-guard.zsh" /usr/local/share/tailscale/tailscale-guard.zsh
+
+# Source the TS_ENFORCE guard from every system zshrc that exists: Debian and
+# Alpine use /etc/zsh/zshrc, RHEL-likes /etc/zshrc. Creating one would clash
+# with a zsh package installed later, so a zsh added after this feature (other
+# than by common-utils, see installsAfter) does not get the guard.
+guard_source='[[ -r /usr/local/share/tailscale/tailscale-guard.zsh ]] && source /usr/local/share/tailscale/tailscale-guard.zsh'
+guard_hooked=""
+for zshrc in /etc/zsh/zshrc /etc/zshrc; do
+  [[ -f "$zshrc" ]] || continue
+  grep -qxF "$guard_source" "$zshrc" || printf '\n# tailscale devcontainer feature: TS_ENFORCE guard\n%s\n' "$guard_source" >> "$zshrc"
+  guard_hooked=1
+done
+if [[ -z "$guard_hooked" ]]; then
+  >&2 echo "WARNING: no system zshrc found, the TS_ENFORCE guard is not active."
+fi
 
 mkdir -p /var/lib/tailscale /var/run/tailscale /var/log
 touch /var/log/tailscaled.log
@@ -78,4 +98,9 @@ if ! command -v iptables >& /dev/null; then
   else
     >&2 echo "WARNING: iptables not installed. tailscaled might fail."
   fi
+fi
+
+# The TS_ENFORCE guard parses `tailscale status --json` with jq.
+if ! command -v jq >& /dev/null; then
+  install_packages jq || >&2 echo "WARNING: jq not installed. The TS_ENFORCE guard will report every shell as unsecure."
 fi

@@ -1,5 +1,10 @@
 # Codespace feature for Tailscale connectivity
 
+> This is the `fhibler` fork of
+> [tailscale/codespace](https://github.com/tailscale/codespace). It adds
+> `TS_EXIT_NODE` and the `TS_ENFORCE` shell guard described below. Fork
+> releases carry a `-fhibler` version suffix.
+
 This repository contains a feature for [GitHub Codespaces](https://github.com/features/codespaces)
 to connect the running VM to a [Tailscale network](https://tailscale.com).
 
@@ -10,7 +15,7 @@ to your `devcontainer.json`:
 
 ```json
 "features": {
-  "ghcr.io/tailscale/codespace/tailscale": {
+  "ghcr.io/fhibler/tailscale-codespace/tailscale": {
     "version": "latest"
   }
 }
@@ -39,6 +44,49 @@ the auth key you made above.
 
 Now whenever you launch a devcontainer with access to this secret, it will
 automatically perform a `tailscale up --accept-routes --auth-key=$TS_AUTH_KEY`.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `TS_AUTH_KEY` | Signs in automatically on start, see above. Removed from the environment before your shell starts. |
+| `TS_EXIT_NODE` | Passed to `tailscale up --exit-node=`. Takes a node name or IP, or `auto:any` to let Tailscale choose. An `auto:` pick is retried for up to 120s, because tailscaled gives up on it when it has no home DERP yet. Needs `TS_AUTH_KEY`. |
+| `TS_ENFORCE` | `1` turns on the zsh guard below. Anything else, or unset, leaves it off. |
+
+Outside Codespaces, keep them in an untracked env file and pass it to the
+container:
+
+```jsonc
+// devcontainer.json
+"runArgs": ["--env-file", ".devcontainer/devcontainer.env"]
+```
+
+```shell
+# .devcontainer/devcontainer.env (add it to .gitignore)
+TS_ENFORCE=1
+TS_AUTH_KEY=tskey-auth-...
+TS_EXIT_NODE=auto:any
+```
+
+`containerEnv` works too for `TS_EXIT_NODE` and `TS_ENFORCE`, but would put
+the auth key into `devcontainer.json`.
+
+## Enforcing an exit node in zsh
+
+With `TS_ENFORCE=1`, every interactive zsh checks that Tailscale is signed in
+and routing through an online exit node. When it is not, the shell prints a
+red `UNSECURE CONNECTION` banner with the reason at startup and prefixes the
+prompt with `UNSECURE`. The check is repeated before every prompt, so the
+marker appears and disappears as the connection changes.
+
+The guard is installed to `/usr/local/share/tailscale/tailscale-guard.zsh` and
+sourced from the system zshrc (`/etc/zsh/zshrc` or `/etc/zshrc`), so it works
+with or without oh-my-zsh and survives any theme. The feature installs after
+`common-utils` so that its zsh is present. A zsh installed by anything later
+does not get the guard; source the file from your own `.zshrc` instead. The
+guard needs `jq`, which the feature installs if it is missing.
+
+It is a warning, not a kill switch: traffic still flows without an exit node.
 
 ## Details
 

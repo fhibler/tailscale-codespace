@@ -37,5 +37,17 @@
         "features": {
             "tailscale": {}
         }
+    },
+    "tailscale_enforce": {
+        "image": "ubuntu:latest",
+        "containerEnv": {
+            "TS_ENFORCE": "1"
+        },
+        "features": {
+            "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": true
+            },
+            "tailscale": {}
+        }
     }
 }
